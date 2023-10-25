@@ -11,6 +11,9 @@ use crate::generate::{
 use crate::integrate;
 use crate::lsp::run_lsp;
 
+use clap::builder::ValueParser;
+use clap::{IntoApp, Parser, Subcommand};
+use clap_generate::{Generator, Shell};
 use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, get_initial_transactions_trackers, update_deployment_costs,
@@ -41,11 +44,9 @@ use std::fs::{self, File};
 use std::io::prelude::*;
 use std::path::PathBuf;
 use std::{env, process};
-
-use clap::builder::ValueParser;
-use clap::{IntoApp, Parser, Subcommand};
-use clap_generate::{Generator, Shell};
 use toml;
+
+use super::global_settings::GlobalSettings;
 
 #[cfg(feature = "telemetry")]
 use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
@@ -550,11 +551,6 @@ struct Check {
     pub use_computed_deployment_plan: bool,
 }
 
-#[derive(Serialize, Deserialize)]
-struct GlobalSettings {
-    disable_hints: bool,
-    enable_telemetry: Option<bool>,
-}
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Completions {
     /// Specify which shell to generation completions script for
@@ -584,40 +580,7 @@ pub fn main() {
         }
     };
 
-    let mut global_settings = String::new();
-    let global_settings_default = GlobalSettings {
-        disable_hints: false,
-        enable_telemetry: None,
-    };
-    // This is backwards compatible with ENV var setting as well as the new ~/.clarinet/Settings.toml
-    let hints_enabled = env::var("CLARINET_DISABLE_HINTS") != Ok("1".into());
-    let home_dir = dirs::home_dir();
-    let mpath: Option<PathBuf> = home_dir.map(|home_dir| home_dir.join(".clarinet/Settings.toml"));
-    let settings_file = "~/.clarinet/Settings.toml";
-    let global_settings: GlobalSettings = match mpath {
-        Some(path) => {
-            if path.exists() {
-                let mut file = File::open(&path).expect("Unable to open the file");
-                let result = file.read_to_string(&mut global_settings);
-                match result {
-                    Ok(_) => match toml::from_str(&global_settings) {
-                        Ok(res) => res,
-                        Err(_) => {
-                            println!("{}{}", format_warn!("unable to parse "), settings_file);
-                            global_settings_default
-                        }
-                    },
-                    Err(_) => {
-                        println!("{}{}", format_warn!("unable to read file "), settings_file);
-                        global_settings_default
-                    }
-                }
-            } else {
-                global_settings_default
-            }
-        }
-        None => global_settings_default,
-    };
+    let global_settings = GlobalSettings::from_global_file();
 
     match opts.command {
         Command::New(project_opts) => {
@@ -686,7 +649,7 @@ pub fn main() {
             if !execute_changes(changes) {
                 std::process::exit(1);
             }
-            if hints_enabled {
+            if !global_settings.disable_hints {
                 display_post_check_hint();
             }
             if telemetry_enabled {
@@ -987,7 +950,7 @@ pub fn main() {
                 if !execute_changes(changes) {
                     std::process::exit(1);
                 }
-                if hints_enabled {
+                if !global_settings.disable_hints {
                     display_post_check_hint();
                 }
             }
@@ -1022,7 +985,7 @@ pub fn main() {
                 if !execute_changes(changes) {
                     std::process::exit(1);
                 }
-                if hints_enabled {
+                if !global_settings.disable_hints {
                     display_post_check_hint();
                 }
             }
@@ -1046,7 +1009,7 @@ pub fn main() {
                 if !execute_changes(vec![Changes::EditTOML(change)]) {
                     std::process::exit(1);
                 }
-                if hints_enabled {
+                if !global_settings.disable_hints {
                     display_post_check_hint();
                 }
             }
@@ -1122,7 +1085,7 @@ pub fn main() {
                 }
             }
 
-            if hints_enabled {
+            if !global_settings.disable_hints {
                 display_post_console_hint();
             }
         }
@@ -1229,7 +1192,7 @@ pub fn main() {
                 false => 1,
             };
 
-            if hints_enabled {
+            if !global_settings.disable_hints {
                 display_post_check_hint();
             }
             if manifest.project.telemetry {
@@ -1329,7 +1292,7 @@ pub fn main() {
                 println!("{}", format_err!(e));
                 process::exit(1);
             }
-            if hints_enabled {
+            if !global_settings.disable_hints {
                 display_deploy_hint();
             }
         }
